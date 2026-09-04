@@ -1,9 +1,10 @@
-iTantra – Offline Multilingual Voice Communication
+# iTantra – Offline Multilingual Voice Communication
 
 iTantra is an Android application developed for the Smart India Hackathon (SIH). It is designed for low-latency voice communication over a local network using on-device speech recognition and speech synthesis.
 
-Current Working Flow
+## Current Working Flow
 
+```
 Voice input
    ↓
 Offline STT
@@ -17,25 +18,22 @@ Receiving device
 TTS
    ↓
 Voice output
+```
 
 Typed messages can also be sent and converted to speech.
 
-Technology Stack
+## Technology Stack
 
-Flutter / Dart — application UI
+- **Flutter / Dart** — application UI
+- **Kotlin** — native Android integration
+- **Sherpa-ONNX** — offline speech processing
+- **ONNX** — local speech models
+- **TCP sockets** — local-network communication
+- **Android** — target platform
 
-Kotlin — native Android integration
+## Project Structure
 
-Sherpa-ONNX — offline speech processing
-
-ONNX — local speech models
-
-TCP sockets — local-network communication
-
-Android — target platform
-
-Project Structure
-
+```
 SIH/
 ├── android/
 │   └── app/src/main/kotlin/
@@ -50,26 +48,22 @@ SIH/
 │   └── widgets/
 ├── pubspec.yaml
 └── README.md
+```
 
-Requirements
+## Requirements
 
 Install the following before running the project:
 
-Git
+- Git
+- Flutter SDK
+- Android Studio
+- Android SDK
+- Android SDK Platform Tools
+- Android emulator or a physical Android phone
 
-Flutter SDK
+> A physical Android phone is recommended for testing the microphone, speaker, STT, TTS, and local-network communication.
 
-Android Studio
-
-Android SDK
-
-Android SDK Platform Tools
-
-Android emulator or a physical Android phone
-
-A physical Android phone is recommended for testing the microphone, speaker, STT, TTS, and local-network communication.
-
-Install Flutter
+## Install Flutter
 
 Install Flutter from the official Flutter documentation:
 
@@ -77,315 +71,344 @@ https://docs.flutter.dev/get-started/install
 
 Verify the installation:
 
+```bash
 flutter --version
+```
 
 Then run:
 
+```bash
 flutter doctor
+```
 
-Fix any Android/Flutter setup issues reported by flutter doctor.
+Fix any Android/Flutter setup issues reported by `flutter doctor`.
 
 Check connected devices:
 
+```bash
 flutter devices
+```
 
-Clone the Repository
+## Clone the Repository
 
+```bash
 git clone https://github.com/ShreeyanshJanu/SIH-21673.git
 cd SIH-21673
+```
 
 Install Flutter dependencies:
 
+```bash
 flutter pub get
+```
 
-Run the Application
+## Run the Application
 
 Connect an Android phone with USB debugging enabled, or start an emulator.
 
 Check devices:
 
+```bash
 flutter devices
+```
 
 Run the application:
 
+```bash
 flutter run
+```
 
 To select a specific device:
 
+```bash
 flutter run -d DEVICE_ID
+```
 
 Example:
 
+```bash
 flutter run -d ZA222MVV6T
+```
 
-Testing Communication
+## Testing Communication
 
 The application uses a local TCP network. The current application port is:
 
+```
 7070
+```
 
 A typical setup is:
 
+```
 Phone B ──┐
 Phone C ──┼──> Phone A (Server / Relay)
 Phone D ──┘
+```
 
 One device runs as the server/relay and other devices connect to it.
 
 Messages are transmitted as text rather than raw voice audio. The receiving device performs TTS locally.
 
-Working on the UI
+## Working on the UI
 
 Most UI development happens inside:
 
+```
 lib/
+```
 
 Start by exploring:
 
+```
 lib/screens/
 lib/widgets/
+```
 
 UI contributors can work on:
 
-Screens
+- Screens
+- Widgets
+- Layouts
+- Colors
+- Typography
+- Spacing
+- Icons
+- Animations
+- Themes
+- User experience
 
-Widgets
-
-Layouts
-
-Colors
-
-Typography
-
-Spacing
-
-Icons
-
-Animations
-
-Themes
-
-User experience
-
-Important
+### Important
 
 If you are working only on the UI, avoid changing the underlying:
 
-android/
-assets/models/
-native MethodChannels
-STT pipeline
-TTS pipeline
-TCP/networking
+- `android/`
+- `assets/models/`
+- native MethodChannels
+- STT pipeline
+- TTS pipeline
+- TCP/networking
 
-unless your task specifically requires it.
+...unless your task specifically requires it.
 
 The native speech pipeline is sensitive, so UI changes should preferably remain within the Flutter layer.
 
-Flutter Hot Reload
+## Flutter Hot Reload
 
 Run:
 
+```bash
 flutter run
+```
 
 After changing Dart UI code, save the file and Flutter will normally hot-reload the application.
 
-If needed, press:
+If needed, press `r` in the Flutter terminal for hot reload. For a full restart, press `R`.
 
-r
-
-in the Flutter terminal for hot reload.
-
-For a full restart:
-
-R
-
-Build an APK
+## Build an APK
 
 Debug APK:
 
+```bash
 flutter build apk --debug
+```
 
 Normally generated at:
 
+```
 build/app/outputs/flutter-apk/app-debug.apk
+```
 
 Release APK:
 
+```bash
 flutter build apk --release
+```
 
 Normally generated at:
 
+```
 build/app/outputs/flutter-apk/app-release.apk
+```
 
-Native Android Code
+## Native Android Code
 
 Native code is located under:
 
+```
 android/app/src/main/kotlin/
+```
 
 Speech recognition code is located under:
 
+```
 android/app/src/main/kotlin/com/sih/voicebridge/pipeline/
+```
 
-SttEngine.kt handles the native STT pipeline and Sherpa-ONNX integration.
+`SttEngine.kt` handles the native STT pipeline and Sherpa-ONNX integration.
 
-Do not modify native speech-processing code for a UI-only task.
+> Do not modify native speech-processing code for a UI-only task.
 
-Offline Models
+## Offline Models
 
 Speech models are stored under:
 
+```
 assets/models/
+```
 
 The application is designed to process speech locally without depending on cloud speech APIs.
 
 The repository currently contains the English STT model used by the working implementation. Additional Indian-language models can be added as development continues.
 
-Model files can be large. Do not add or replace large model files without checking their size and licensing first.
+> Model files can be large. Do not add or replace large model files without checking their size and licensing first.
 
-Git Workflow
+## Git Workflow
 
-Do not work directly on main for new features.
+Do not work directly on `main` for new features.
 
 Create a feature branch:
 
+```bash
 git checkout -b ui-improvement
+```
 
 Make and test your changes.
 
 Check:
 
+```bash
 git status
 git diff
+```
 
 Commit:
 
+```bash
 git add .
 git commit -m "Improve application UI"
+```
 
 Push:
 
+```bash
 git push -u origin ui-improvement
+```
 
 Then create a Pull Request on GitHub.
 
 Example branches:
 
+```
 main
 ├── ui-improvement
 ├── improve-stt-accuracy
 └── emergency-ui
+```
 
-Before Creating a Pull Request
+## Before Creating a Pull Request
 
 Run:
 
+```bash
 flutter analyze
+```
 
 and:
 
+```bash
 flutter build apk --debug
+```
 
 Also verify:
 
-UI works on Android
+- [ ] UI works on Android
+- [ ] Voice communication still works
+- [ ] Typed messages still work
+- [ ] TCP communication still works
+- [ ] No API keys or passwords were committed
+- [ ] No generated build directories were committed
+- [ ] Changes are on a feature branch
 
-Voice communication still works
+## Troubleshooting
 
-Typed messages still work
-
-TCP communication still works
-
-No API keys or passwords were committed
-
-No generated build directories were committed
-
-Changes are on a feature branch
-
-Troubleshooting
-
-Flutter is not recognized
+**Flutter is not recognized**
 
 Make sure Flutter's bin directory is in PATH, then restart the terminal:
 
+```bash
 flutter --version
+```
 
-Android device is not detected
+**Android device is not detected**
 
 Run:
 
+```bash
 flutter devices
+```
 
 For a physical phone, enable Developer Options and USB debugging and accept the computer authorization prompt.
 
 You can also check:
 
+```bash
 adb devices
+```
 
-Multiple Android devices are connected
+**Multiple Android devices are connected**
 
 List devices:
 
+```bash
 flutter devices
+```
 
 Then select one:
 
+```bash
 flutter run -d DEVICE_ID
+```
 
-Build problems after dependency changes
+**Build problems after dependency changes**
 
 Try:
 
+```bash
 flutter clean
 flutter pub get
 flutter build apk --debug
+```
 
-Development Roadmap
+## Development Roadmap
 
 Current development priorities include:
 
-Improve STT accuracy
+- Improve STT accuracy
+- Improve microphone/audio processing
+- Add more Indian languages
+- Improve offline TTS
+- Improve Flutter UI/UX
+- Improve emergency communication
+- Test on low- and mid-range Android devices
+- Measure latency, CPU, RAM, and APK size
 
-Improve microphone/audio processing
-
-Add more Indian languages
-
-Improve offline TTS
-
-Improve Flutter UI/UX
-
-Improve emergency communication
-
-Test on low- and mid-range Android devices
-
-Measure latency, CPU, RAM, and APK size
-
-Contributing
+## Contributing
 
 For UI contributors:
 
-Clone the repository
+1. Clone the repository
+2. Install Flutter and Android tooling
+3. Create a feature branch
+4. Make UI changes in `lib/`
+5. Test on Android
+6. Run `flutter analyze`
+7. Build a debug APK
+8. Commit your changes
+9. Push your branch
+10. Create a Pull Request
 
-Install Flutter and Android tooling
-
-Create a feature branch
-
-Make UI changes in lib/
-
-Test on Android
-
-Run flutter analyze
-
-Build a debug APK
-
-Commit your changes
-
-Push your branch
-
-Create a Pull Request
-
-License
+## License
 
 Add the project's final license information here before public release.
 
