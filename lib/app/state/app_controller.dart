@@ -1,0 +1,572 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../models/benchmark_models.dart';
+import '../models/connection_config.dart';
+import '../models/language_option.dart';
+import '../models/operation_mode.dart';
+import '../models/speech_message.dart';
+import '../services/benchmark_export_service.dart';
+import '../services/benchmark_history_storage_service.dart';
+import '../services/benchmark_tracker.dart';
+import '../services/native_bridge_service.dart';
+import '../services/tcp_message_service.dart';
+
+class AppController extends ChangeNotifier {
+  static const int _maxBenchmarkHistory = 50;
+
+  AppController({
+    NativeBridgeService? nativeBridgeService,
+    TcpMessageService? tcpMessageService,
+    BenchmarkTracker? benchmarkTracker,
+    BenchmarkExportService? benchmarkExportService,
+    BenchmarkHistoryStorageService? benchmarkHistoryStorageService,
+  })  : _nativeBridgeService = nativeBridgeService ?? NativeBridgeService(),
+        _tcpMessageService = tcpMessageService ?? TcpMessageService(),
+        _benchmarkTracker = benchmarkTracker ?? BenchmarkTracker(),
+        _benchmarkExportService =
+            benchmarkExportService ?? const BenchmarkExportService(),
+        _benchmarkHistoryStorageService =
+            benchmarkHistoryStorageService ?? BenchmarkHistoryStorageService();
+
+  final NativeBridgeService _nativeBridgeService;
+  final TcpMessageService _tcpMessageService;
+  final BenchmarkTracker _benchmarkTracker;
+  final BenchmarkExportService _benchmarkExportService;
+  final BenchmarkHistoryStorageService _benchmarkHistoryStorageService;
+
+  StreamSubscription<NativeEvent>? _nativeEventsSub;
+  bool _initialized = false;
+  bool _isConnected = false;
+  bool _isListening = false;
+  String _status = 'Booting...';
+  String _partialTranscript = '';
+  OperationMode _operationMode = OperationMode.walkieTalkie;
+  LanguageOption _selectedLanguage = kLanguageOptions.first;
+  ConnectionConfig _connectionConfig = ConnectionConfig.initial;
+  final List<SpeechMessage> _history = <SpeechMessage>[];
+  final List<BenchmarkSnapshot> _benchmarkHistory = <BenchmarkSnapshot>[];
+  final Map<String, SpeechMessage> _messageById = <String, SpeechMessage>{};
+  BenchmarkSnapshot? _latestBenchmark;
+  String? _activeMessageId;
+
+  bool get isConnected => _isConnected;
+  bool get isListening => _isListening;
+  String get status => _status;
+  String get partialTranscript => _partialTranscript;
+  OperationMode get operationMode => _operationMode;
+  LanguageOption get selectedLanguage => _selectedLanguage;
+  ConnectionConfig get connectionConfig => _connectionConfig;
+  List<SpeechMessage> get history => List<SpeechMessage>.unmodifiable(_history);
+  List<BenchmarkSnapshot> get benchmarkHistory =>
+      List<BenchmarkSnapshot>.unmodifiable(_benchmarkHistory);
+  BenchmarkSnapshot? get latestBenchmark => _latestBenchmark;
+  ResourceBenchmark get resourceBenchmark =>
+      _benchmarkTracker.resourceBenchmark;
+
+  Future<void> initialize() async {
+    if (_initialized) {
+      return;
+    }
+
+    _tcpMessageService.onMessage = _handleIncomingMessage;
+    _tcpMessageService.onStatus = (String status) {
+      _status = status;
+      notifyListeners();
+    };
+
+    _nativeEventsSub = _nativeBridgeService.events.listen(_handleNativeEvent);
+    await _nativeBridgeService.initialize(languageCode: _selectedLanguage.code);
+
+    final PersistedBenchmarkHistory persistedHistory =
+        await _benchmarkHistoryStorageService.load(
+      appDataPathProvider: _nativeBridgeService.getAppDataDirectoryPath,
+    );
+    _restorePersistedBenchmarkHistory(persistedHistory);
+
+    _status = _nativeBridgeService.nativeAvailable
+        ? 'Ready'
+        : 'Ready (native stubs active)';
+    _initialized = true;
+    notifyListeners();
+  }
+
+  void updateConnectionConfig(ConnectionConfig config) {
+    _connectionConfig = config;
+    notifyListeners();
+  }
+
+  Future<void> connect() async {
+    const int port = ConnectionConfig.networkPort;
+
+    debugPrint(
+      'TCP CONNECT: host=${_connectionConfig.host}, '
+      'port=$port, '
+      'server=${_connectionConfig.runAsServer}',
+    );
+
+    try {
+      if (_connectionConfig.runAsServer) {
+        await _tcpMessageService.startServer(
+          port: port,
+        );
+      } else {
+        await _tcpMessageService.connect(
+          host: _connectionConfig.host,
+          port: port,
+        );
+      }
+
+      _isConnected = true;
+
+      _status = _connectionConfig.runAsServer
+          ? 'Server listening on port $port'
+          : 'Connected to ${_connectionConfig.host}:$port';
+    } catch (error) {
+      _isConnected = false;
+      _status = 'Connection failed: $error';
+
+      debugPrint('TCP CONNECTION ERROR: $error');
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> disconnect() async {
+    await _tcpMessageService.close();
+    _isConnected = false;
+    _status = 'Disconnected';
+    notifyListeners();
+  }
+
+  Future<void> setLanguage(LanguageOption language) async {
+    _selectedLanguage = language;
+    await _nativeBridgeService.setLanguage(language.code);
+    _status = 'Language set to ${language.label}';
+    notifyListeners();
+  }
+
+  Future<void> setOperationMode(OperationMode mode) async {
+    _operationMode = mode;
+    await _nativeBridgeService.setOperationMode(mode);
+    _status = mode == OperationMode.walkieTalkie
+        ? 'Walkie-talkie mode'
+        : 'Continuous mode';
+    notifyListeners();
+  }
+
+  Future<void> startPushToTalk() async {
+    if (_isListening) {
+      return;
+    }
+
+    final String messageId = _newMessageId();
+    _activeMessageId = messageId;
+    _isListening = true;
+    _partialTranscript = '';
+    _status = 'Listening...';
+    _benchmarkTracker.mark(messageId, BenchmarkEvent.t0SpeechStart);
+
+    await _nativeBridgeService.startListening(
+      ptt: _operationMode == OperationMode.walkieTalkie,
+      languageCode: _selectedLanguage.code,
+      messageId: messageId,
+    );
+
+    notifyListeners();
+  }
+
+  Future<void> stopPushToTalk() async {
+    if (!_isListening) {
+      return;
+    }
+
+    _isListening = false;
+    final String? messageId = _activeMessageId;
+    if (messageId != null) {
+      _benchmarkTracker.mark(messageId, BenchmarkEvent.t1SpeechEnd);
+    }
+
+    _status = 'Processing speech...';
+    notifyListeners();
+    await _nativeBridgeService.stopListening();
+  }
+
+  Future<void> sendTypedMessage(String text, {bool emergency = false}) async {
+    final String cleaned = text.trim();
+    if (cleaned.isEmpty) {
+      return;
+    }
+
+    final String messageId = _newMessageId();
+    _benchmarkTracker
+      ..mark(messageId, BenchmarkEvent.t0SpeechStart)
+      ..mark(messageId, BenchmarkEvent.t1SpeechEnd)
+      ..mark(messageId, BenchmarkEvent.t2SttFinal);
+
+    final SpeechMessage message = SpeechMessage(
+      id: messageId,
+      type: emergency ? MessageType.emergency : MessageType.speech,
+      languageCode: _selectedLanguage.code,
+      message: cleaned,
+      timestamp: DateTime.now(),
+      origin: MessageOrigin.local,
+    );
+
+    await _sendOutgoingMessage(message);
+  }
+
+  Future<void> sendEmergencyPreset() {
+    return sendTypedMessage('Medical assistance required', emergency: true);
+  }
+
+  void clearHistory() {
+    final Set<String> messageIds = <String>{
+      ..._history.map((SpeechMessage message) => message.id),
+      ..._benchmarkHistory
+          .map((BenchmarkSnapshot snapshot) => snapshot.messageId),
+    };
+    for (final String messageId in messageIds) {
+      _benchmarkTracker.clear(messageId);
+    }
+
+    _history.clear();
+    _benchmarkHistory.clear();
+    _messageById.clear();
+    _latestBenchmark = null;
+    unawaited(
+      _benchmarkHistoryStorageService.clear(
+        appDataPathProvider: _nativeBridgeService.getAppDataDirectoryPath,
+      ),
+    );
+    notifyListeners();
+  }
+
+  String? exportLatestBenchmarkAsJson() {
+    final BenchmarkSnapshot? snapshot = _latestBenchmark;
+    if (snapshot == null) {
+      return null;
+    }
+
+    return _benchmarkExportService.toJson(
+      snapshot: snapshot,
+      resource: _benchmarkTracker.resourceBenchmark,
+      message: _lookupMessage(snapshot.messageId),
+    );
+  }
+
+  String? exportLatestBenchmarkAsCsv() {
+    final BenchmarkSnapshot? snapshot = _latestBenchmark;
+    if (snapshot == null) {
+      return null;
+    }
+
+    return _benchmarkExportService.toCsv(
+      snapshot: snapshot,
+      resource: _benchmarkTracker.resourceBenchmark,
+      message: _lookupMessage(snapshot.messageId),
+    );
+  }
+
+  String? exportBenchmarkHistoryAsJson({int? limit}) {
+    if (_benchmarkHistory.isEmpty) {
+      return null;
+    }
+
+    return _benchmarkExportService.historyToJson(
+      snapshots: _benchmarkHistory,
+      limit: limit,
+      messageLookup: _lookupMessage,
+    );
+  }
+
+  String? exportBenchmarkHistoryAsCsv({int? limit}) {
+    if (_benchmarkHistory.isEmpty) {
+      return null;
+    }
+
+    return _benchmarkExportService.historyToCsv(
+      snapshots: _benchmarkHistory,
+      limit: limit,
+      messageLookup: _lookupMessage,
+    );
+  }
+
+  Future<void> _sendOutgoingMessage(SpeechMessage message) async {
+    _history.insert(0, message);
+    _rememberMessage(message);
+    _benchmarkTracker.mark(message.id, BenchmarkEvent.t3MessageSent);
+
+    if (_isConnected) {
+      try {
+        await _tcpMessageService.send(message);
+        _status = 'Message sent';
+      } catch (error) {
+        _status = 'Send failed: $error';
+      }
+    } else {
+      _status = 'No peer connected. Running one-phone loop.';
+      final SpeechMessage loopback = message.copyWith(
+        origin: MessageOrigin.remote,
+      );
+      await _playIncomingMessage(loopback);
+    }
+
+    _recordBenchmark(
+      _benchmarkTracker.snapshotFor(
+        message.id,
+        audioDuration: _estimateAudioDuration(message.message),
+      ),
+    );
+    _partialTranscript = '';
+    notifyListeners();
+  }
+
+  Future<void> _handleIncomingMessage(SpeechMessage message) async {
+    await _playIncomingMessage(message.copyWith(origin: MessageOrigin.remote));
+    notifyListeners();
+  }
+
+  Future<void> _playIncomingMessage(SpeechMessage message) async {
+    _history.insert(0, message);
+    _rememberMessage(message);
+    _benchmarkTracker.mark(message.id, BenchmarkEvent.t4MessageReceived);
+
+    await _nativeBridgeService.speakText(
+      text: message.message,
+      emergency: message.type == MessageType.emergency,
+      languageCode: message.languageCode,
+      messageId: message.id,
+    );
+
+    _recordBenchmark(
+      _benchmarkTracker.snapshotFor(
+        message.id,
+        audioDuration: _estimateAudioDuration(message.message),
+      ),
+    );
+
+    _status = message.type == MessageType.emergency
+        ? 'Emergency alert queued'
+        : 'Message queued for playback';
+  }
+
+  void _handleNativeEvent(NativeEvent event) {
+    switch (event.type) {
+      case NativeEventType.partial:
+        _partialTranscript = event.text ?? _partialTranscript;
+        notifyListeners();
+        break;
+      case NativeEventType.finalSentence:
+        final String transcript = (event.text ?? '').trim();
+        if (transcript.isNotEmpty) {
+          final String messageId =
+              event.messageId ?? _activeMessageId ?? _newMessageId();
+          _benchmarkTracker.mark(messageId, BenchmarkEvent.t2SttFinal);
+          final SpeechMessage outgoing = SpeechMessage(
+            id: messageId,
+            type: MessageType.speech,
+            languageCode: _selectedLanguage.code,
+            message: transcript,
+            timestamp: DateTime.now(),
+            origin: MessageOrigin.local,
+          );
+          _activeMessageId = null;
+          if (_operationMode == OperationMode.walkieTalkie || !_isListening) {
+            _isListening = false;
+          }
+          unawaited(_sendOutgoingMessage(outgoing));
+        }
+        break;
+      case NativeEventType.ttsStarted:
+        if (event.messageId != null) {
+          _benchmarkTracker.mark(event.messageId!, BenchmarkEvent.t5TtsStart);
+          _status = 'TTS started';
+          notifyListeners();
+        }
+        break;
+      case NativeEventType.audioStarted:
+        if (event.messageId != null) {
+          _benchmarkTracker.mark(
+            event.messageId!,
+            BenchmarkEvent.t6AudioFirstFrame,
+          );
+          _recordBenchmark(
+            _benchmarkTracker.snapshotFor(
+              event.messageId!,
+              audioDuration: _estimateAudioDuration(event.text ?? ''),
+            ),
+          );
+
+          final SpeechMessage? message = _lookupMessage(event.messageId!);
+          if (message != null) {
+            _status = message.type == MessageType.emergency
+                ? 'Emergency alert played'
+                : 'Message played';
+          }
+
+          notifyListeners();
+        }
+        break;
+      case NativeEventType.resourceMetrics:
+        final ResourceBenchmark? resource =
+            _parseResourceBenchmark(event.payload);
+        if (resource != null) {
+          _benchmarkTracker.updateResourceUsage(resource);
+          final BenchmarkSnapshot? snapshot = _latestBenchmark;
+          if (snapshot != null) {
+            _recordBenchmark(
+              _benchmarkTracker.snapshotFor(
+                snapshot.messageId,
+                audioDuration: snapshot.audioDuration,
+                processingDuration: snapshot.processingDuration,
+              ),
+            );
+          }
+          notifyListeners();
+        }
+        break;
+      case NativeEventType.status:
+        if ((event.text ?? '').isNotEmpty) {
+          _status = event.text!;
+          notifyListeners();
+        }
+        break;
+      case NativeEventType.error:
+        _status = 'Native error: ${event.text ?? 'unknown'}';
+        notifyListeners();
+        break;
+    }
+  }
+
+  Duration _estimateAudioDuration(String text) {
+    final int wordCount = text
+        .split(RegExp(r'\s+'))
+        .where((String token) => token.trim().isNotEmpty)
+        .length;
+    final int estimatedMs = (wordCount * 350).clamp(500, 15000).toInt();
+    return Duration(milliseconds: estimatedMs);
+  }
+
+  String _newMessageId() {
+    return DateTime.now().microsecondsSinceEpoch.toString();
+  }
+
+  SpeechMessage? _lookupMessage(String messageId) {
+    final SpeechMessage? cached = _messageById[messageId];
+    if (cached != null) {
+      return cached;
+    }
+
+    for (final SpeechMessage message in _history) {
+      if (message.id == messageId) {
+        _messageById[messageId] = message;
+        return message;
+      }
+    }
+
+    return null;
+  }
+
+  void _rememberMessage(SpeechMessage message) {
+    _messageById[message.id] = message;
+  }
+
+  Future<void> _persistBenchmarkHistory() async {
+    await _benchmarkHistoryStorageService.save(
+      snapshots: _benchmarkHistory,
+      messageLookup: _lookupMessage,
+      appDataPathProvider: _nativeBridgeService.getAppDataDirectoryPath,
+    );
+  }
+
+  void _restorePersistedBenchmarkHistory(PersistedBenchmarkHistory persisted) {
+    _benchmarkHistory.clear();
+    _messageById.clear();
+
+    final List<BenchmarkSnapshot> limitedSnapshots =
+        persisted.snapshots.take(_maxBenchmarkHistory).toList(growable: false);
+
+    _benchmarkHistory.addAll(limitedSnapshots);
+    _latestBenchmark =
+        _benchmarkHistory.isEmpty ? null : _benchmarkHistory.first;
+
+    for (final BenchmarkSnapshot snapshot in limitedSnapshots) {
+      final SpeechMessage? message = persisted.messagesById[snapshot.messageId];
+      if (message != null) {
+        _messageById[snapshot.messageId] = message;
+      }
+    }
+  }
+
+  void _recordBenchmark(BenchmarkSnapshot snapshot) {
+    _latestBenchmark = snapshot;
+
+    final int existingIndex = _benchmarkHistory.indexWhere(
+      (BenchmarkSnapshot item) => item.messageId == snapshot.messageId,
+    );
+    if (existingIndex >= 0) {
+      _benchmarkHistory.removeAt(existingIndex);
+    }
+
+    _benchmarkHistory.insert(0, snapshot);
+    if (_benchmarkHistory.length > _maxBenchmarkHistory) {
+      final List<BenchmarkSnapshot> removed =
+          _benchmarkHistory.sublist(_maxBenchmarkHistory);
+      for (final BenchmarkSnapshot item in removed) {
+        _messageById.remove(item.messageId);
+        _benchmarkTracker.clear(item.messageId);
+      }
+      _benchmarkHistory.removeRange(
+        _maxBenchmarkHistory,
+        _benchmarkHistory.length,
+      );
+    }
+
+    unawaited(_persistBenchmarkHistory());
+  }
+
+  ResourceBenchmark? _parseResourceBenchmark(Map<dynamic, dynamic>? payload) {
+    if (payload == null) {
+      return null;
+    }
+
+    return ResourceBenchmark(
+      sttRamMb: _parseMetric(payload['sttRamMb']),
+      ttsRamMb: _parseMetric(payload['ttsRamMb']),
+      idleRamMb: _parseMetric(payload['idleRamMb']),
+      peakRamMb: _parseMetric(payload['peakRamMb']),
+      idleCpuPct: _parseMetric(payload['idleCpuPct']),
+      sttCpuPct: _parseMetric(payload['sttCpuPct']),
+      ttsCpuPct: _parseMetric(payload['ttsCpuPct']),
+      sttModelSizeMb: _parseMetric(payload['sttModelSizeMb']),
+      ttsModelSizeMb: _parseMetric(payload['ttsModelSizeMb']),
+      apkSizeMb: _parseMetric(payload['apkSizeMb']),
+    );
+  }
+
+  double? _parseMetric(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      return double.tryParse(value);
+    }
+    return null;
+  }
+
+  @override
+  void dispose() {
+    final StreamSubscription<NativeEvent>? nativeEventsSub = _nativeEventsSub;
+    if (nativeEventsSub != null) {
+      unawaited(nativeEventsSub.cancel());
+    }
+    unawaited(_nativeBridgeService.dispose());
+    unawaited(_tcpMessageService.close());
+    super.dispose();
+  }
+}

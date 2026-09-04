@@ -1,0 +1,38 @@
+{
+  "languages": {
+    "en": {
+      "backend": "piper_sherpa",
+      "model": "assets/models/tts/en/en_US-ljspeech-high.onnx",
+      "tokens": "assets/models/tts/en/tokens.txt",
+      "data": "assets/models/tts/en/espeak-ng-data"
+    },
+    "hi": {
+      "backend": "android_tts"
+    },
+    "gu": {
+      "backend": "android_tts"
+    },
+    "mr": {
+      "backend": "android_tts"
+    },
+    "kn": {
+      "backend": "android_tts"
+    },
+    "ml": {
+      "backend": "android_tts"
+    },
+    "ta": {
+      "backend": "android_tts"
+    },
+    "te": {
+      "backend": "android_tts"
+    },
+    "bn": {
+      "backend": "android_tts"
+    },
+    "or": {
+      "backend": "android_tts"
+    }
+  }
+}
+
