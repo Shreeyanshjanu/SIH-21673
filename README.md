@@ -1,119 +1,392 @@
-# SIH Voice Bridge
+iTantra – Offline Multilingual Voice Communication
 
-Offline speech-to-speech emergency communication app aligned to your architecture:
+iTantra is an Android application developed for the Smart India Hackathon (SIH). It is designed for low-latency voice communication over a local network using on-device speech recognition and speech synthesis.
 
-- `Flutter` UI for PTT, language, connection, alerts, and benchmarking.
-- `Flutter MethodChannel + EventChannel` bridge to Android/Kotlin native pipeline.
-- Local-network `TCP` text transfer (no internet required).
-- Structured timeline metrics (`T0..T6`) for latency/RTF benchmarking.
+Current Working Flow
 
-## Current implementation status
+Voice input
+   ↓
+Offline STT
+   ↓
+Text message
+   ↓
+TCP over local Wi-Fi / hotspot
+   ↓
+Receiving device
+   ↓
+TTS
+   ↓
+Voice output
 
-This repository is a phase-oriented scaffold that directly follows your roadmap:
+Typed messages can also be sent and converted to speech.
 
-- Phase 0: environment structure ✅
-- Phase 1: mic capture + VAD + streaming STT session contract + transcript UI ✅
-- Phase 2: native Android TextToSpeech playback + utterance events ✅
-- Phase 3: one-phone loop ✅ (auto local TTS when peer not connected)
-- Phase 4: two-phone text communication over TCP/Wi-Fi ✅
-- Phase 5: sentence-finalization pipeline hooks ✅
-- Phase 6: walkie-talkie hold-to-talk UI ✅
-- Phase 7: emergency message type + priority playback hook ✅
-- Phase 8+: modularized to extend bidirectional + multilingual + optimization ✅
+Technology Stack
 
-> Native Kotlin classes now run real PCM microphone capture (`16kHz mono`) and energy-based pause detection.
-> `SttEngine` now includes a Sherpa-ONNX reflective backend loader with safe fallback if dependency/model files are missing.
-> `TtsEngine` now supports pluggable backends with Android `TextToSpeech` fallback and manifest-based Piper/Sherpa routing.
-> Native resource telemetry now streams phase-wise CPU/RAM/model/APK metrics to Flutter benchmark UI.
+Flutter / Dart — application UI
 
-## Project layout
+Kotlin — native Android integration
 
-- `lib/app/state/app_controller.dart`: app orchestration and mode/state transitions.
-- `lib/app/services/native_bridge_service.dart`: Dart-side Method/Event channels.
-- `lib/app/services/tcp_message_service.dart`: local TCP communication transport.
-- `lib/app/services/benchmark_tracker.dart`: `T0..T6`, latency, and RTF capture.
-- `lib/app/ui/home_screen.dart`: main operator UI (connection, language, PTT, alerts, metrics).
-- `android/app/src/main/kotlin/com/sih/voicebridge/pipeline`: native Android pipeline modules.
+Sherpa-ONNX — offline speech processing
 
-## Message schema
+ONNX — local speech models
 
-```json
-{
-  "id": "1725218320000000",
-  "type": "speech",
-  "language": "en",
-  "message": "Emergency assistance is required",
-  "timestamp": 1725218320000
-}
-```
+TCP sockets — local-network communication
 
-Emergency message uses `"type": "emergency"`.
+Android — target platform
 
-## Benchmarking captured
+Project Structure
 
-- `T0`: speech starts
-- `T1`: speech ends
-- `T2`: STT final result
-- `T3`: message sent
-- `T4`: message received
-- `T5`: TTS starts
-- `T6`: first audio playback
+SIH/
+├── android/
+│   └── app/src/main/kotlin/
+├── assets/
+│   └── models/
+│       ├── stt/
+│       └── tts/
+├── lib/
+│   ├── models/
+│   ├── screens/
+│   ├── services/
+│   └── widgets/
+├── pubspec.yaml
+└── README.md
 
-Calculated outputs:
+Requirements
 
-- `STT latency = T2 - T1`
-- `Network latency = T4 - T3`
-- `TTS latency = T6 - T4`
-- `End-to-end latency = T6 - T0`
-- `RTF = processing_time / audio_duration`
+Install the following before running the project:
 
-Runtime resource telemetry:
+Git
 
-- `Idle RAM`, `STT RAM`, `TTS RAM`, `Peak RAM`
-- `Idle CPU %`, `STT CPU %`, `TTS CPU %`
-- `STT model size`, `TTS model size`, `APK size`
-- One-tap benchmark export from UI (`Copy JSON`, `Copy CSV`)
-- Multi-sample benchmark history export (`History JSON`, `History CSV`, max 50 samples)
-- Benchmark history persistence across app restarts
+Flutter SDK
 
-## Setup
+Android Studio
 
-1. Install Flutter + Android toolchain.
-2. Run `flutter pub get`.
-3. Put STT/TTS assets under:
-   - `assets/models/stt/`
-   - `assets/models/tts/`
-4. Configure STT manifest at:
-   - `assets/models/stt/model_manifest.json`
-5. Configure TTS manifest at:
-   - `assets/models/tts/model_manifest.json`
-6. Place per-language model files at paths referenced in manifests.
-7. Add Sherpa Android dependency in `android/app/build.gradle` (if not already included in your local setup).
-8. Launch app once and grant microphone permission.
-9. Run on Android with `flutter run`.
+Android SDK
 
-## TTS notes
+Android SDK Platform Tools
 
-- Backend selection is language-driven via `assets/models/tts/model_manifest.json`.
-- If Piper/Sherpa backend is unavailable or model assets are missing, runtime automatically falls back to Android `TextToSpeech`.
-- Emergency messages use flush-priority utterances and restore system volume after playback completion.
-- Keep `tts_started` / `audio_started` events unchanged so benchmarking remains consistent across backend swaps.
+Android emulator or a physical Android phone
 
-## Language roadmap mapping
+A physical Android phone is recommended for testing the microphone, speaker, STT, TTS, and local-network communication.
 
-Configured language set includes:
+Install Flutter
 
-- English
-- Hindi
-- Gujarati
-- Marathi
-- Kannada
-- Malayalam
-- Tamil
-- Telugu
-- Bengali
-- Odia (flagged as pending model availability)
+Install Flutter from the official Flutter documentation:
 
-## Next integration step
+https://docs.flutter.dev/get-started/install
 
-Finalize Sherpa binding by ensuring your exact Sherpa Java API version is on classpath, then tune silence threshold (`500-1000ms`) and benchmark on-device.
+Verify the installation:
+
+flutter --version
+
+Then run:
+
+flutter doctor
+
+Fix any Android/Flutter setup issues reported by flutter doctor.
+
+Check connected devices:
+
+flutter devices
+
+Clone the Repository
+
+git clone https://github.com/ShreeyanshJanu/SIH-21673.git
+cd SIH-21673
+
+Install Flutter dependencies:
+
+flutter pub get
+
+Run the Application
+
+Connect an Android phone with USB debugging enabled, or start an emulator.
+
+Check devices:
+
+flutter devices
+
+Run the application:
+
+flutter run
+
+To select a specific device:
+
+flutter run -d DEVICE_ID
+
+Example:
+
+flutter run -d ZA222MVV6T
+
+Testing Communication
+
+The application uses a local TCP network. The current application port is:
+
+7070
+
+A typical setup is:
+
+Phone B ──┐
+Phone C ──┼──> Phone A (Server / Relay)
+Phone D ──┘
+
+One device runs as the server/relay and other devices connect to it.
+
+Messages are transmitted as text rather than raw voice audio. The receiving device performs TTS locally.
+
+Working on the UI
+
+Most UI development happens inside:
+
+lib/
+
+Start by exploring:
+
+lib/screens/
+lib/widgets/
+
+UI contributors can work on:
+
+Screens
+
+Widgets
+
+Layouts
+
+Colors
+
+Typography
+
+Spacing
+
+Icons
+
+Animations
+
+Themes
+
+User experience
+
+Important
+
+If you are working only on the UI, avoid changing the underlying:
+
+android/
+assets/models/
+native MethodChannels
+STT pipeline
+TTS pipeline
+TCP/networking
+
+unless your task specifically requires it.
+
+The native speech pipeline is sensitive, so UI changes should preferably remain within the Flutter layer.
+
+Flutter Hot Reload
+
+Run:
+
+flutter run
+
+After changing Dart UI code, save the file and Flutter will normally hot-reload the application.
+
+If needed, press:
+
+r
+
+in the Flutter terminal for hot reload.
+
+For a full restart:
+
+R
+
+Build an APK
+
+Debug APK:
+
+flutter build apk --debug
+
+Normally generated at:
+
+build/app/outputs/flutter-apk/app-debug.apk
+
+Release APK:
+
+flutter build apk --release
+
+Normally generated at:
+
+build/app/outputs/flutter-apk/app-release.apk
+
+Native Android Code
+
+Native code is located under:
+
+android/app/src/main/kotlin/
+
+Speech recognition code is located under:
+
+android/app/src/main/kotlin/com/sih/voicebridge/pipeline/
+
+SttEngine.kt handles the native STT pipeline and Sherpa-ONNX integration.
+
+Do not modify native speech-processing code for a UI-only task.
+
+Offline Models
+
+Speech models are stored under:
+
+assets/models/
+
+The application is designed to process speech locally without depending on cloud speech APIs.
+
+The repository currently contains the English STT model used by the working implementation. Additional Indian-language models can be added as development continues.
+
+Model files can be large. Do not add or replace large model files without checking their size and licensing first.
+
+Git Workflow
+
+Do not work directly on main for new features.
+
+Create a feature branch:
+
+git checkout -b ui-improvement
+
+Make and test your changes.
+
+Check:
+
+git status
+git diff
+
+Commit:
+
+git add .
+git commit -m "Improve application UI"
+
+Push:
+
+git push -u origin ui-improvement
+
+Then create a Pull Request on GitHub.
+
+Example branches:
+
+main
+├── ui-improvement
+├── improve-stt-accuracy
+└── emergency-ui
+
+Before Creating a Pull Request
+
+Run:
+
+flutter analyze
+
+and:
+
+flutter build apk --debug
+
+Also verify:
+
+UI works on Android
+
+Voice communication still works
+
+Typed messages still work
+
+TCP communication still works
+
+No API keys or passwords were committed
+
+No generated build directories were committed
+
+Changes are on a feature branch
+
+Troubleshooting
+
+Flutter is not recognized
+
+Make sure Flutter's bin directory is in PATH, then restart the terminal:
+
+flutter --version
+
+Android device is not detected
+
+Run:
+
+flutter devices
+
+For a physical phone, enable Developer Options and USB debugging and accept the computer authorization prompt.
+
+You can also check:
+
+adb devices
+
+Multiple Android devices are connected
+
+List devices:
+
+flutter devices
+
+Then select one:
+
+flutter run -d DEVICE_ID
+
+Build problems after dependency changes
+
+Try:
+
+flutter clean
+flutter pub get
+flutter build apk --debug
+
+Development Roadmap
+
+Current development priorities include:
+
+Improve STT accuracy
+
+Improve microphone/audio processing
+
+Add more Indian languages
+
+Improve offline TTS
+
+Improve Flutter UI/UX
+
+Improve emergency communication
+
+Test on low- and mid-range Android devices
+
+Measure latency, CPU, RAM, and APK size
+
+Contributing
+
+For UI contributors:
+
+Clone the repository
+
+Install Flutter and Android tooling
+
+Create a feature branch
+
+Make UI changes in lib/
+
+Test on Android
+
+Run flutter analyze
+
+Build a debug APK
+
+Commit your changes
+
+Push your branch
+
+Create a Pull Request
+
+License
+
+Add the project's final license information here before public release.
+
+Third-party libraries and speech models may have separate licenses. Check their licenses before redistribution.
