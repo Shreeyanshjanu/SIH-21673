@@ -183,7 +183,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<LanguageOption>(
-              value: controller.selectedLanguage,
+              initialValue: controller.selectedLanguage,
               isExpanded: true,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'state/app_controller.dart';
-import 'ui/home_screen.dart';
+import 'theme/app_theme.dart';
+import 'ui/app_shell.dart';
 
 class SihVoiceBridgeApp extends StatefulWidget {
   const SihVoiceBridgeApp({super.key});
@@ -17,6 +18,7 @@ class _SihVoiceBridgeAppState extends State<SihVoiceBridgeApp> {
   void initState() {
     super.initState();
     _controller = AppController();
+    _controller.initialize();
   }
 
   @override
@@ -29,9 +31,9 @@ class _SihVoiceBridgeAppState extends State<SihVoiceBridgeApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'SIH Voice Bridge',
-      theme: ThemeData(colorSchemeSeed: Colors.blue, useMaterial3: true),
-      home: HomeScreen(controller: _controller),
+      title: 'iTantra Voice Bridge',
+      theme: AppTheme.dark(),
+      home: AppShell(controller: _controller),
     );
   }
 }
