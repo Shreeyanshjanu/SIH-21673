@@ -19,6 +19,7 @@ class VadProcessor(
     private var speechStartedAtMs: Long? = null
     private var lastSpeechAtMs: Long? = null
     private var noiseFloor = 0.002
+    private var processedSamples = 0L
 
     fun configureSilenceThreshold(valueMs: Long) {
         silenceThresholdMs = valueMs.coerceIn(300, 2000)
@@ -29,6 +30,7 @@ class VadProcessor(
     }
 
     fun reset() {
+        processedSamples = 0
         inSpeech = false
         speechStartedAtMs = null
         lastSpeechAtMs = null
@@ -39,6 +41,8 @@ class VadProcessor(
     }
 
     fun process(frame: AudioFrame): VadDecision {
+        processedSamples += frame.samples.size
+        val audioTimeMs = processedSamples * 1000L / frame.sampleRate
         val rmsEnergy = calculateRmsEnergy(frame.samples)
         val dynamicThreshold = maxOf(baseEnergyThreshold, noiseFloor * 3.2)
         val speech = rmsEnergy >= dynamicThreshold
@@ -54,13 +58,13 @@ class VadProcessor(
         if (speech) {
             if (!inSpeech) {
                 speechStarted = true
-                speechStartedAtMs = frame.timestampMs
+                speechStartedAtMs = audioTimeMs
                 inSpeech = true
             }
-            lastSpeechAtMs = frame.timestampMs
+            lastSpeechAtMs = audioTimeMs
         } else if (inSpeech) {
-            val lastSpeech = lastSpeechAtMs ?: frame.timestampMs
-            silenceMs = (frame.timestampMs - lastSpeech).coerceAtLeast(0)
+            val lastSpeech = lastSpeechAtMs ?: audioTimeMs
+            silenceMs = (audioTimeMs - lastSpeech).coerceAtLeast(0)
 
             val speechStartedAt = speechStartedAtMs
             val speechDuration = if (speechStartedAt == null) {

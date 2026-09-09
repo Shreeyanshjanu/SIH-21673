@@ -10,6 +10,10 @@ enum NativeEventType {
   ttsStarted,
   audioStarted,
   resourceMetrics,
+  captureState,
+  sttReady,
+  sttMetrics,
+  captureMetrics,
   status,
   error,
 }
@@ -26,6 +30,14 @@ NativeEventType nativeEventTypeFromWire(String rawType) {
       return NativeEventType.audioStarted;
     case 'resource_metrics':
       return NativeEventType.resourceMetrics;
+    case 'capture_state':
+      return NativeEventType.captureState;
+    case 'stt_ready':
+      return NativeEventType.sttReady;
+    case 'stt_metrics':
+      return NativeEventType.sttMetrics;
+    case 'capture_metrics':
+      return NativeEventType.captureMetrics;
     case 'error':
       return NativeEventType.error;
     default:
@@ -55,7 +67,10 @@ class NativeEvent {
       text: raw['text']?.toString(),
       messageId: raw['messageId']?.toString(),
       payload: raw,
-      timestamp: DateTime.now(),
+      timestamp: raw['timestampEpochMs'] is num
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (raw['timestampEpochMs'] as num).toInt())
+          : DateTime.now(),
     );
   }
 }
@@ -97,41 +112,25 @@ class NativeBridgeService {
     });
   }
 
-  Future<void> startListening({
+  Future<bool> startListening({
     required bool ptt,
     required String languageCode,
     required String messageId,
+    int? pressedAtEpochMs,
   }) async {
     _activeMessageId = messageId;
-    final bool ok = await _invoke('startListening', <String, dynamic>{
+    return _invoke('startListening', <String, dynamic>{
       'ptt': ptt,
       'languageCode': languageCode,
       'messageId': messageId,
+      'pressedAtEpochMs':
+          pressedAtEpochMs ?? DateTime.now().millisecondsSinceEpoch,
     });
-    if (!ok) {
-      _eventsController.add(
-        NativeEvent(
-          type: NativeEventType.status,
-          text: 'Native pipeline unavailable. Running in scaffold mode.',
-        ),
-      );
-    }
   }
 
   Future<void> stopListening() async {
-    final bool ok = await _invoke('stopListening');
-    if (!ok) {
-      final String messageId =
-          _activeMessageId ?? 'mock-${DateTime.now().microsecondsSinceEpoch}';
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      _eventsController.add(
-        NativeEvent(
-          type: NativeEventType.finalSentence,
-          text: 'Emergency assistance is required',
-          messageId: messageId,
-        ),
-      );
-    }
+    await _invoke(
+        'stopListening', <String, dynamic>{'messageId': _activeMessageId});
   }
 
   Future<void> speakText({
@@ -140,29 +139,12 @@ class NativeBridgeService {
     required String languageCode,
     required String messageId,
   }) async {
-    final bool ok = await _invoke('speakText', <String, dynamic>{
+    await _invoke('speakText', <String, dynamic>{
       'text': text,
       'emergency': emergency,
       'languageCode': languageCode,
       'messageId': messageId,
     });
-    if (!ok) {
-      _eventsController.add(
-        NativeEvent(
-          type: NativeEventType.ttsStarted,
-          text: text,
-          messageId: messageId,
-        ),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      _eventsController.add(
-        NativeEvent(
-          type: NativeEventType.audioStarted,
-          text: text,
-          messageId: messageId,
-        ),
-      );
-    }
   }
 
   Future<void> setEmergencyOverride(bool enabled) async {
@@ -194,17 +176,27 @@ class NativeBridgeService {
       return true;
     } on MissingPluginException {
       _nativeAvailable = false;
+      _emitInvocationError(method,
+          'Native pipeline unavailable; no recognition or playback was performed.');
       return false;
     } on PlatformException catch (error) {
-      _eventsController.add(
-        NativeEvent(
-          type: NativeEventType.error,
-          text: error.message ?? error.code,
-          messageId: _activeMessageId,
-        ),
-      );
+      _emitInvocationError(method, error.message ?? error.code);
       return false;
     }
+  }
+
+  void _emitInvocationError(String method, String text) {
+    if (_eventsController.isClosed) return;
+    _eventsController.add(NativeEvent(
+      type: NativeEventType.error,
+      text: text,
+      messageId: _activeMessageId,
+      payload: <String, dynamic>{
+        'operation': method,
+        'captureId': _activeMessageId,
+        'captureError': method == 'startListening' || method == 'stopListening',
+      },
+    ));
   }
 
   Future<void> _subscribeToEventStream() async {
@@ -216,6 +208,11 @@ class NativeBridgeService {
       _nativeEventSubscription = _eventChannel.receiveBroadcastStream().listen(
         (dynamic payload) {
           if (payload is Map<dynamic, dynamic>) {
+            if (payload['type'] == 'capture_state' &&
+                payload['state'] == 'stopped' &&
+                payload['captureId'] == _activeMessageId) {
+              _activeMessageId = null;
+            }
             _eventsController.add(NativeEvent.fromMap(payload));
           }
         },
@@ -235,6 +232,7 @@ class NativeBridgeService {
   }
 
   Future<void> dispose() async {
+    if (_activeMessageId != null) await stopListening();
     await _nativeEventSubscription?.cancel();
     await _eventsController.close();
   }

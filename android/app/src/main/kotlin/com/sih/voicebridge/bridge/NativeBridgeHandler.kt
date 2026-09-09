@@ -197,13 +197,15 @@ class NativeBridgeHandler(
                     orchestrator.startListening(
                         ptt = ptt,
                         messageId = messageId,
+                        pressedAtEpochMs = call.argument<Number>("pressedAtEpochMs")?.toLong(),
+                        requestedLanguage = call.argument<String>("languageCode"),
                     )
 
                     result.success(null)
                 }
 
                 "stopListening" -> {
-                    orchestrator.stopListening()
+                    orchestrator.stopListening(call.argument<String>("messageId"))
 
                     result.success(null)
                 }

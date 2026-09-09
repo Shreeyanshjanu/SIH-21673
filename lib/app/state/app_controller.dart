@@ -40,6 +40,11 @@ class AppController extends ChangeNotifier {
   bool _initialized = false;
   bool _isConnected = false;
   bool _isListening = false;
+  bool _capturePending = false;
+  bool _stopRequested = false;
+  bool? _sttReady;
+  Map<String, dynamic> _latestSttMetrics = <String, dynamic>{};
+  Map<String, dynamic> _latestCaptureMetrics = <String, dynamic>{};
   String _status = 'Booting...';
   String _partialTranscript = '';
   OperationMode _operationMode = OperationMode.walkieTalkie;
@@ -53,6 +58,11 @@ class AppController extends ChangeNotifier {
 
   bool get isConnected => _isConnected;
   bool get isListening => _isListening;
+  bool get isCapturePending => _capturePending;
+  Map<String, dynamic> get latestSttMetrics =>
+      Map<String, dynamic>.unmodifiable(_latestSttMetrics);
+  Map<String, dynamic> get latestCaptureMetrics =>
+      Map<String, dynamic>.unmodifiable(_latestCaptureMetrics);
   String get status => _status;
   String get partialTranscript => _partialTranscript;
   OperationMode get operationMode => _operationMode;
@@ -85,9 +95,13 @@ class AppController extends ChangeNotifier {
     );
     _restorePersistedBenchmarkHistory(persistedHistory);
 
-    _status = _nativeBridgeService.nativeAvailable
-        ? 'Ready'
-        : 'Ready (native stubs active)';
+    _status = !_nativeBridgeService.nativeAvailable
+        ? 'Native speech unavailable; typed messaging remains available'
+        : _sttReady == false
+            ? 'Offline STT unavailable; typed messaging remains available'
+            : _sttReady == true
+                ? 'Ready'
+                : 'Preparing offline speech recognition...';
     _initialized = true;
     notifyListeners();
   }
@@ -157,38 +171,49 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> startPushToTalk() async {
-    if (_isListening) {
+    final DateTime pressedAt = DateTime.now();
+    if (_capturePending) {
+      return;
+    }
+    if (_sttReady == false) {
+      _status = 'Offline STT unavailable; no fallback transcript will be sent';
+      notifyListeners();
       return;
     }
 
     final String messageId = _newMessageId();
     _activeMessageId = messageId;
-    _isListening = true;
+    _capturePending = true;
+    _stopRequested = false;
+    _isListening = false;
     _partialTranscript = '';
-    _status = 'Listening...';
-    _benchmarkTracker.mark(messageId, BenchmarkEvent.t0SpeechStart);
+    _status = 'Starting microphone... wait for Listening';
+    _benchmarkTracker.mark(messageId, BenchmarkEvent.t0SpeechStart,
+        at: pressedAt);
 
-    await _nativeBridgeService.startListening(
+    notifyListeners();
+    final bool accepted = await _nativeBridgeService.startListening(
       ptt: _operationMode == OperationMode.walkieTalkie,
       languageCode: _selectedLanguage.code,
       messageId: messageId,
+      pressedAtEpochMs: pressedAt.millisecondsSinceEpoch,
     );
-
+    if (!accepted && _activeMessageId == messageId) {
+      _capturePending = false;
+      _activeMessageId = null;
+      _status = 'Could not start native speech capture';
+    }
     notifyListeners();
   }
 
   Future<void> stopPushToTalk() async {
-    if (!_isListening) {
+    if (!_capturePending || _stopRequested) {
       return;
     }
 
     _isListening = false;
-    final String? messageId = _activeMessageId;
-    if (messageId != null) {
-      _benchmarkTracker.mark(messageId, BenchmarkEvent.t1SpeechEnd);
-    }
-
-    _status = 'Processing speech...';
+    _stopRequested = true;
+    _status = 'Finishing captured audio and recognizing speech...';
     notifyListeners();
     await _nativeBridgeService.stopListening();
   }
@@ -359,23 +384,29 @@ class AppController extends ChangeNotifier {
         notifyListeners();
         break;
       case NativeEventType.finalSentence:
+        if (event.payload?['recognitionValid'] != true ||
+            event.payload?['fallback'] == true) {
+          _status = 'Rejected unverified or fallback speech result';
+          notifyListeners();
+          break;
+        }
         final String transcript = (event.text ?? '').trim();
         if (transcript.isNotEmpty) {
           final String messageId =
               event.messageId ?? _activeMessageId ?? _newMessageId();
-          _benchmarkTracker.mark(messageId, BenchmarkEvent.t2SttFinal);
+          if (_benchmarkTracker.snapshotFor(messageId).marks.t2SttFinal ==
+              null) {
+            _benchmarkTracker.mark(messageId, BenchmarkEvent.t2SttFinal);
+          }
           final SpeechMessage outgoing = SpeechMessage(
             id: messageId,
             type: MessageType.speech,
-            languageCode: _selectedLanguage.code,
+            languageCode: event.payload?['languageCode']?.toString() ??
+                _selectedLanguage.code,
             message: transcript,
             timestamp: DateTime.now(),
             origin: MessageOrigin.local,
           );
-          _activeMessageId = null;
-          if (_operationMode == OperationMode.walkieTalkie || !_isListening) {
-            _isListening = false;
-          }
           unawaited(_sendOutgoingMessage(outgoing));
         }
         break;
@@ -427,6 +458,49 @@ class AppController extends ChangeNotifier {
           notifyListeners();
         }
         break;
+      case NativeEventType.captureState:
+        if (event.payload?['captureId'] != _activeMessageId) break;
+        if (event.payload?['state'] == 'recording') {
+          _isListening = !_stopRequested;
+          if (!_stopRequested) {
+            _status = event.text ?? 'Listening';
+          }
+          if (event.messageId != null) {
+            _benchmarkTracker.mark(
+                event.messageId!, BenchmarkEvent.t0SpeechStart,
+                at: event.timestamp);
+          }
+        } else if (event.payload?['state'] == 'stopped') {
+          _capturePending = false;
+          _isListening = false;
+          _stopRequested = false;
+          _activeMessageId = null;
+          if (event.payload?['failed'] == true ||
+              _status.startsWith('Finishing') ||
+              _status.startsWith('Starting')) {
+            _status = event.text ?? 'Recording finished';
+          }
+        }
+        notifyListeners();
+        break;
+      case NativeEventType.sttReady:
+        _sttReady = event.payload?['available'] == true;
+        _status = event.text ?? (_sttReady! ? 'STT ready' : 'STT unavailable');
+        notifyListeners();
+        break;
+      case NativeEventType.sttMetrics:
+        _latestSttMetrics = Map<String, dynamic>.from(
+            event.payload ?? const <String, dynamic>{});
+        debugPrint('STT AUDIO: $_latestSttMetrics');
+        _recordMeasuredAudio(event);
+        notifyListeners();
+        break;
+      case NativeEventType.captureMetrics:
+        _latestCaptureMetrics = Map<String, dynamic>.from(
+            event.payload ?? const <String, dynamic>{});
+        debugPrint('CAPTURE AUDIO: $_latestCaptureMetrics');
+        notifyListeners();
+        break;
       case NativeEventType.status:
         if ((event.text ?? '').isNotEmpty) {
           _status = event.text!;
@@ -434,10 +508,48 @@ class AppController extends ChangeNotifier {
         }
         break;
       case NativeEventType.error:
+        if (event.payload?['captureError'] == true &&
+            event.payload?['captureId'] == _activeMessageId) {
+          _capturePending = false;
+          _isListening = false;
+          _stopRequested = false;
+          _activeMessageId = null;
+        }
         _status = 'Native error: ${event.text ?? 'unknown'}';
         notifyListeners();
         break;
     }
+  }
+
+  void _recordMeasuredAudio(NativeEvent event) {
+    final Map<dynamic, dynamic>? metrics = event.payload;
+    final String? messageId = event.messageId;
+    if (messageId == null ||
+        metrics == null ||
+        metrics['recognitionValid'] != true) {
+      return;
+    }
+    final double? audioMs = _parseMetric(metrics['audioDurationMs']);
+    final double? processingMs = _parseMetric(metrics['processingDurationMs']);
+    if (audioMs == null || processingMs == null) return;
+    _benchmarkTracker.recordAudioTiming(
+      messageId,
+      audioDuration: Duration(microseconds: (audioMs * 1000).round()),
+      processingDuration: Duration(microseconds: (processingMs * 1000).round()),
+    );
+    final Map<BenchmarkEvent, String> marks = <BenchmarkEvent, String>{
+      BenchmarkEvent.t0SpeechStart: 'audioStartEpochMs',
+      BenchmarkEvent.t1SpeechEnd: 'audioEndEpochMs',
+      BenchmarkEvent.t2SttFinal: 'recognitionFinishedEpochMs',
+    };
+    for (final MapEntry<BenchmarkEvent, String> mark in marks.entries) {
+      final double? at = _parseMetric(metrics[mark.value]);
+      if (at != null) {
+        _benchmarkTracker.mark(messageId, mark.key,
+            at: DateTime.fromMillisecondsSinceEpoch(at.round()));
+      }
+    }
+    _recordBenchmark(_benchmarkTracker.snapshotFor(messageId));
   }
 
   Duration _estimateAudioDuration(String text) {

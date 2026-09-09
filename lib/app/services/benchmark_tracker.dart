@@ -3,6 +3,9 @@ import '../models/benchmark_models.dart';
 class BenchmarkTracker {
   final Map<String, BenchmarkMarks> _marksByMessageId =
       <String, BenchmarkMarks>{};
+  final Map<String, Duration> _measuredAudioDurations = <String, Duration>{};
+  final Map<String, Duration> _measuredProcessingDurations =
+      <String, Duration>{};
   ResourceBenchmark _resourceBenchmark = const ResourceBenchmark(
     sttModelSizeMb: 175,
   );
@@ -21,6 +24,15 @@ class BenchmarkTracker {
     _resourceBenchmark = usage;
   }
 
+  void recordAudioTiming(
+    String messageId, {
+    required Duration audioDuration,
+    required Duration processingDuration,
+  }) {
+    _measuredAudioDurations[messageId] = audioDuration;
+    _measuredProcessingDurations[messageId] = processingDuration;
+  }
+
   BenchmarkSnapshot snapshotFor(
     String messageId, {
     Duration? audioDuration,
@@ -33,13 +45,17 @@ class BenchmarkTracker {
       messageId: messageId,
       marks: marks,
       resource: _resourceBenchmark,
-      audioDuration: audioDuration,
-      processingDuration: processingDuration ?? _inferProcessingDuration(marks),
+      audioDuration: _measuredAudioDurations[messageId] ?? audioDuration,
+      processingDuration: _measuredProcessingDurations[messageId] ??
+          processingDuration ??
+          _inferProcessingDuration(marks),
     );
   }
 
   void clear(String messageId) {
     _marksByMessageId.remove(messageId);
+    _measuredAudioDurations.remove(messageId);
+    _measuredProcessingDurations.remove(messageId);
   }
 
   Duration? _inferProcessingDuration(BenchmarkMarks marks) {

@@ -9,15 +9,17 @@ import java.io.FileOutputStream
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
-import kotlin.math.min
 import android.util.Log
 private const val TAG = "SIH_STT"
 data class SttResult(
     val partial: String?,
     val finalText: String?,
+    val metrics: Map<String, Any> = emptyMap(),
+    val error: String? = null,
 )
 
 interface StreamingSttSession {
+    val metrics: Map<String, Any> get() = emptyMap()
     fun acceptAudio(samples: ShortArray, sampleRate: Int): String?
     fun finalizeText(): String
     fun close() {}
@@ -25,6 +27,8 @@ interface StreamingSttSession {
 
 interface StreamingSttBackend {
     val backendName: String
+    val recognitionAvailable: Boolean get() = true
+    fun prepare() {}
     fun createSession(languageCode: String): StreamingSttSession
     fun close() {}
 }
@@ -34,7 +38,8 @@ interface ModelSizedSttBackend {
 }
 
 class FallbackSttBackend : StreamingSttBackend, ModelSizedSttBackend {
-    override val backendName: String = "fallback_template"
+    override val backendName: String = "fallback_unavailable"
+    override val recognitionAvailable = false
 
     override fun createSession(languageCode: String): StreamingSttSession {
         return FallbackSttSession(languageCode)
@@ -48,45 +53,11 @@ class FallbackSttBackend : StreamingSttBackend, ModelSizedSttBackend {
 class FallbackSttSession(
     private val languageCode: String,
 ) : StreamingSttSession {
-    private val phrase: String = phraseFor(languageCode)
-    private val words = phrase.split(' ')
-    private var totalSamples = 0
-    private var emittedWordCount = 0
-
-    override fun acceptAudio(samples: ShortArray, sampleRate: Int): String? {
-        if (sampleRate <= 0 || words.isEmpty()) {
-            return null
-        }
-
-        totalSamples += samples.size
-        val seconds = totalSamples / sampleRate.toDouble()
-        val approximateWords = min(words.size, (seconds / 0.38).toInt().coerceAtLeast(1))
-
-        if (approximateWords <= emittedWordCount) {
-            return null
-        }
-
-        emittedWordCount = approximateWords
-        return words.take(emittedWordCount).joinToString(" ")
-    }
-
-    override fun finalizeText(): String {
-        return phrase
-    }
-
-    private fun phraseFor(code: String): String {
-        return when (code) {
-            "hi" -> "आपातकालीन सहायता आवश्यक है"
-            "gu" -> "તાત્કાલિક મદદ જરૂરી છે"
-            "mr" -> "तत्काळ मदतीची गरज आहे"
-            "kn" -> "ತುರ್ತು ಸಹಾಯ ಅಗತ್ಯವಿದೆ"
-            "ml" -> "അടിയന്തര സഹായം ആവശ്യമാണ്"
-            "ta" -> "அவசர உதவி தேவை"
-            "te" -> "అత్యవసర సహాయం అవసరం"
-            "bn" -> "জরুরি সহায়তা প্রয়োজন"
-            else -> "Emergency assistance is required"
-        }
-    }
+    override val metrics: Map<String, Any> get() = mapOf(
+        "fallback" to true, "recognitionValid" to false, "decodeCalls" to 0,
+    )
+    override fun acceptAudio(samples: ShortArray, sampleRate: Int): String? = null
+    override fun finalizeText(): String = ""
 }
 
 data class SttModelSpec(
@@ -419,10 +390,18 @@ class SherpaOnnxReflectiveBackend(
 ) : StreamingSttBackend, ModelSizedSttBackend {
     override val backendName: String = "sherpa_reflective_${model.languageCode}"
 
-    private val recognizer: Any by lazy {
+    private val recognizerDelegate = lazy {
         val recognizerConfig = buildRecognizerConfig(model)
             ?: throw IllegalStateException("Unable to build Sherpa recognizer config")
         createRecognizer(recognizerConfig)
+    }
+    private val recognizer: Any get() = recognizerDelegate.value
+    private val apiDelegate = lazy { OfflineRecognizerApi(recognizer) }
+    private var released = false
+
+    override fun prepare() {
+        check(!released) { "Sherpa backend has been released" }
+        apiDelegate.value
     }
 
     override fun createSession(languageCode: String): StreamingSttSession {
@@ -432,19 +411,15 @@ class SherpaOnnxReflectiveBackend(
             )
         }
 
-        val stream = invokeBestMatch(
-            target = recognizer,
-            methodNames = listOf("createStream", "createOfflineStream"),
-            args = emptyList(),
-        ) ?: throw IllegalStateException("Unable to create Sherpa stream")
-
         onStatus("Sherpa STT session started (${model.languageCode})")
-        return SherpaOnnxReflectiveSession(recognizer, stream)
+        return SherpaOnnxReflectiveSession(apiDelegate.value)
     }
 
     override fun close() {
-        invokeNoArg(recognizer, "close")
-        invokeNoArg(recognizer, "release")
+        if (!released && recognizerDelegate.isInitialized()) {
+            released = true
+            recognizer.javaClass.getMethod("release").invoke(recognizer)
+        }
     }
 
     override fun modelSizeBytes(): Long? {
@@ -627,24 +602,23 @@ class SherpaOnnxReflectiveBackend(
         val modelConfig = instantiate(modelConfigClass) ?: return null
 
         configureModelConfig(modelConfig, model)
-        setProperty(recognizerConfig, listOf("modelConfig", "offlineModelConfig"), modelConfig)
-        setProperty(recognizerConfig, listOf("decodingMethod"), "greedy_search")
-        setProperty(recognizerConfig, listOf("maxActivePaths"), 4)
+        requireProperty(recognizerConfig, listOf("modelConfig", "offlineModelConfig"), modelConfig)
+        requireProperty(recognizerConfig, listOf("decodingMethod"), "greedy_search")
+        requireProperty(recognizerConfig, listOf("maxActivePaths"), 4)
 
         val featureConfig = classOrNull("com.k2fsa.sherpa.onnx.FeatureConfig")?.let { instantiate(it) }
-        if (featureConfig != null) {
-            setProperty(featureConfig, listOf("sampleRate"), 16000f)
-            setProperty(featureConfig, listOf("featureDim", "numBins"), 80)
-            setProperty(recognizerConfig, listOf("featConfig", "featureConfig"), featureConfig)
-        }
+            ?: error("Sherpa FeatureConfig is unavailable")
+        requireProperty(featureConfig, listOf("sampleRate"), 16000f)
+        requireProperty(featureConfig, listOf("featureDim", "numBins"), 80)
+        requireProperty(recognizerConfig, listOf("featConfig", "featureConfig"), featureConfig)
 
         return recognizerConfig
     }
 
     private fun configureModelConfig(modelConfig: Any, model: ResolvedSttModel) {
-        setProperty(modelConfig, listOf("numThreads"), 2)
-        setProperty(modelConfig, listOf("provider"), "cpu")
-        setProperty(modelConfig, listOf("debug"), false)
+        requireProperty(modelConfig, listOf("numThreads"), 2)
+        requireProperty(modelConfig, listOf("provider"), "cpu")
+        requireProperty(modelConfig, listOf("debug"), false)
 
         when (model.type.lowercase()) {
             "transducer" -> configureTransducerModel(modelConfig, model)
@@ -658,12 +632,12 @@ class SherpaOnnxReflectiveBackend(
     ) {
         val nemoClass =
             classOrNull("com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig")
-                ?: return
+                ?: error("Sherpa NeMo CTC configuration is unavailable")
     
-        val nemoConfig = instantiate(nemoClass) ?: return
+        val nemoConfig = instantiate(nemoClass) ?: error("Cannot create Sherpa NeMo CTC configuration")
     
         // NeMo CTC model path
-        setProperty(
+        requireProperty(
             nemoConfig,
             listOf("model"),
             model.modelFile.absolutePath
@@ -671,23 +645,18 @@ class SherpaOnnxReflectiveBackend(
     
         // IMPORTANT:
         // OfflineModelConfig uses "nemo", not "nemoCtc"
-        setProperty(
+        requireProperty(
             modelConfig,
             listOf("nemo", "nemoCtc"),
             nemoConfig
         )
     
         // tokens.txt belongs directly to OfflineModelConfig
-        if (model.tokensFile != null) {
-            setProperty(
-                modelConfig,
-                listOf("tokens", "tokensPath"),
-                model.tokensFile.absolutePath
-            )
-        }
+        val tokensFile = model.tokensFile ?: error("NeMo CTC tokens are missing")
+        requireProperty(modelConfig, listOf("tokens", "tokensPath"), tokensFile.absolutePath)
     
         // Tell Sherpa explicitly that this is a NeMo CTC model.
-        setProperty(
+        requireProperty(
             modelConfig,
             listOf("modelType"),
             "nemo_ctc"
@@ -712,113 +681,6 @@ class SherpaOnnxReflectiveBackend(
     }
 }
 
-class SherpaOnnxReflectiveSession(
-    private val recognizer: Any,
-    private val stream: Any,
-) : StreamingSttSession {
-    private var frameCounter = 0
-    private var lastText = ""
-
-    override fun acceptAudio(samples: ShortArray, sampleRate: Int): String? {
-        val accepted = acceptWaveform(samples, sampleRate)
-        if (!accepted) {
-            return null
-        }
-
-        frameCounter += 1
-        if (frameCounter < 3) {
-            return null
-        }
-        frameCounter = 0
-
-        decodeOnce()
-        val text = readResultText().trim()
-        if (text.isBlank() || text == lastText) {
-            return null
-        }
-
-        lastText = text
-        return text
-    }
-
-    override fun finalizeText(): String {
-        invokeNoArg(stream, "inputFinished")
-        invokeNoArg(stream, "setInputFinished")
-
-        decodeOnce()
-        val text = readResultText().trim()
-        if (text.isNotBlank()) {
-            lastText = text
-        }
-        return lastText
-    }
-
-    override fun close() {
-        invokeNoArg(stream, "close")
-        invokeNoArg(stream, "release")
-    }
-
-    private fun acceptWaveform(samples: ShortArray, sampleRate: Int): Boolean {
-        val floatSamples = FloatArray(samples.size) { idx -> samples[idx] / 32768.0f }
-
-        val result = invokeBestMatch(
-            target = stream,
-            methodNames = listOf("acceptWaveform", "acceptSamples"),
-            args = listOf(floatSamples, sampleRate),
-        ) ?: invokeBestMatch(
-            target = stream,
-            methodNames = listOf("acceptWaveform", "acceptSamples"),
-            args = listOf(sampleRate, floatSamples),
-        ) ?: invokeBestMatch(
-            target = stream,
-            methodNames = listOf("acceptWaveform", "acceptSamples"),
-            args = listOf(samples, sampleRate),
-        ) ?: invokeBestMatch(
-            target = stream,
-            methodNames = listOf("acceptWaveform", "acceptSamples"),
-            args = listOf(sampleRate, samples),
-        )
-
-        return result != null || hasMethod(stream, "acceptWaveform")
-    }
-
-    private fun decodeOnce() {
-        invokeBestMatch(
-            target = recognizer,
-            methodNames = listOf("decode", "decodeStream"),
-            args = listOf(stream),
-        ) ?: invokeNoArg(recognizer, "decode")
-    }
-
-    private fun readResultText(): String {
-        val result = invokeBestMatch(
-            target = recognizer,
-            methodNames = listOf("getResult", "getResults"),
-            args = listOf(stream),
-        ) ?: invokeNoArg(recognizer, "getResult")
-
-        if (result == null) {
-            return ""
-        }
-
-        if (result is String) {
-            return result
-        }
-
-        val textFromMethod = invokeNoArg(result, "getText")
-        if (textFromMethod is String) {
-            return textFromMethod
-        }
-
-        val textField = getFieldValue(result, "text")
-        if (textField is String) {
-            return textField
-        }
-
-        return ""
-    }
-}
-
 class SttEngine(
     context: Context,
     private val onStatus: (String) -> Unit = {},
@@ -833,6 +695,8 @@ class SttEngine(
 
     val backendName: String
         get() = backend.backendName
+    val recognitionAvailable: Boolean
+        get() = backend.recognitionAvailable
 
     fun currentModelSizeMb(): Double? {
         val sizedBackend = backend as? ModelSizedSttBackend
@@ -863,71 +727,86 @@ class SttEngine(
         return resolvedBytes / (1024.0 * 1024.0)
     }
 
+    @Synchronized
     fun initialize(languageCode: String) {
         this.languageCode = languageCode
         selectBackend(languageCode)
     }
 
+    @Synchronized
     fun setLanguage(languageCode: String) {
         this.languageCode = languageCode
         selectBackend(languageCode)
     }
 
+    @Synchronized
     fun beginSession() {
+        check(recognitionAvailable) { "STT unavailable for $languageCode; fallback transcripts are disabled" }
         resetSession()
         activeSession = backend.createSession(languageCode)
     }
 
+    @Synchronized
     fun acceptAudio(samples: ShortArray, sampleRate: Int): SttResult {
-        val session = activeSession ?: return SttResult(partial = null, finalText = null)
-        val partial = try {
-            session.acceptAudio(samples, sampleRate)
-        } catch (error: Throwable) {
-            onStatus("STT acceptAudio error: ${error.message}")
-            null
-        }
+        val session = activeSession ?: error("No active STT session to receive audio")
+        val partial = session.acceptAudio(samples, sampleRate)
         return SttResult(partial = partial, finalText = null)
     }
 
+    @Synchronized
     fun finalizeSession(): SttResult {
         val session = activeSession
-        activeSession = null
         if (session == null) {
             return SttResult(partial = null, finalText = "")
         }
 
-        val finalText = try {
-            session.finalizeText()
+        return try {
+            val text = session.finalizeText()
+            SttResult(partial = null, finalText = text, metrics = session.metrics)
         } catch (error: Throwable) {
-            onStatus("STT finalize error: ${error.message}")
-            ""
+            SttResult(
+                partial = null, finalText = null, metrics = session.metrics,
+                error = error.message ?: error.javaClass.simpleName,
+            )
+        } finally {
+            session.close()
+            activeSession = null
         }
-        session.close()
-        return SttResult(partial = null, finalText = finalText)
     }
 
+    @Synchronized
+    fun currentSessionMetrics(): Map<String, Any> = activeSession?.metrics.orEmpty()
+
+    @Synchronized
     fun resetSession() {
         activeSession?.close()
         activeSession = null
     }
 
+    @Synchronized
     fun shutdown() {
         resetSession()
         backend.close()
+        backend = fallbackBackend
     }
 
     private fun selectBackend(languageCode: String) {
         resetSession()
 
-        val nextBackend = sherpaFactory.createBackend(languageCode) ?: fallbackBackend
-        val changed = backend.backendName != nextBackend.backendName
-        if (changed) {
-            backend.close()
-            backend = nextBackend
-            onStatus("STT backend active: ${backend.backendName}")
-        } else {
-            backend = nextBackend
+        runCatching { backend.close() }.onFailure { onStatus("STT release failed: ${it.message}") }
+        backend = fallbackBackend
+        val nextBackend = sherpaFactory.createBackend(languageCode)
+        if (nextBackend != null) {
+            try {
+                nextBackend.prepare()
+                backend = nextBackend
+            } catch (error: Throwable) {
+                onStatus("STT preparation failed: ${error.message}")
+                runCatching { nextBackend.close() }
+            }
         }
+        onStatus(if (recognitionAvailable) "STT ready: ${backend.backendName}"
+            else "STT UNAVAILABLE: fallback mode flagged; no fabricated transcript will be emitted")
     }
 }
 
@@ -973,6 +852,12 @@ private fun defaultValueFor(type: Class<*>): Any? {
         type == String::class.java -> ""
         type.isEnum -> type.enumConstants?.firstOrNull()
         else -> null
+    }
+}
+
+private fun requireProperty(target: Any, candidateNames: List<String>, value: Any?) {
+    check(setProperty(target, candidateNames, value)) {
+        "Cannot configure ${target.javaClass.simpleName}.${candidateNames.joinToString("/")}"
     }
 }
 
