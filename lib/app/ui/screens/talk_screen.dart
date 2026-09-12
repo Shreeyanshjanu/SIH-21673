@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../models/operation_mode.dart';
+
 import '../../state/app_controller.dart';
+
 import '../../theme/app_theme.dart';
+
 import '../widgets/pulsing_dot.dart';
 
 class TalkScreen extends StatefulWidget {
@@ -15,7 +18,8 @@ class TalkScreen extends StatefulWidget {
 }
 
 class _TalkScreenState extends State<TalkScreen> {
-  final TextEditingController _quickTextController = TextEditingController();
+  final TextEditingController _quickTextController =
+      TextEditingController();
 
   @override
   void dispose() {
@@ -27,7 +31,8 @@ class _TalkScreenState extends State<TalkScreen> {
   Widget build(BuildContext context) {
     final AppController controller = widget.controller;
     final bool connected = controller.isConnected;
-    final bool isHandsFree = controller.operationMode == OperationMode.continuous;
+    final bool isHandsFree =
+        controller.operationMode == OperationMode.continuous;
 
     return SafeArea(
       bottom: false,
@@ -98,7 +103,9 @@ class _TalkScreenState extends State<TalkScreen> {
               ),
               child: Icon(
                 connected ? Icons.check_circle : Icons.sensors_off,
-                color: connected ? AppColors.tertiaryFixed : AppColors.outlineVariant,
+                color: connected
+                    ? AppColors.tertiaryFixed
+                    : AppColors.outlineVariant,
                 size: 26,
               ),
             ),
@@ -110,7 +117,10 @@ class _TalkScreenState extends State<TalkScreen> {
                   Row(
                     children: <Widget>[
                       if (connected) ...<Widget>[
-                        const PulsingDot(color: AppColors.onTertiaryFixed, size: 8),
+                        const PulsingDot(
+                          color: AppColors.onTertiaryFixed,
+                          size: 8,
+                        ),
                         const SizedBox(width: 6),
                       ],
                       Text(
@@ -158,17 +168,26 @@ class _TalkScreenState extends State<TalkScreen> {
             ),
             child: Row(
               children: <Widget>[
-                const Icon(Icons.translate, color: AppColors.secondary, size: 22),
+                const Icon(
+                  Icons.translate,
+                  color: AppColors.secondary,
+                  size: 22,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text('SPEAKING IN', style: AppTypography.labelCaps),
+                      Text(
+                        'SPEAKING IN',
+                        style: AppTypography.labelCaps,
+                      ),
                       Text(
                         controller.selectedLanguage.label,
                         overflow: TextOverflow.ellipsis,
-                        style: AppTypography.headlineSm.copyWith(fontSize: 14),
+                        style: AppTypography.headlineSm.copyWith(
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
@@ -178,6 +197,7 @@ class _TalkScreenState extends State<TalkScreen> {
           ),
         ),
         const SizedBox(width: 8),
+
         // Active unit card
         Expanded(
           child: Container(
@@ -207,11 +227,18 @@ class _TalkScreenState extends State<TalkScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text('ACTIVE UNIT', style: AppTypography.labelCaps),
                       Text(
-                        controller.isConnected ? 'Mesh Connected' : 'Solo Local',
+                        'ACTIVE UNIT',
+                        style: AppTypography.labelCaps,
+                      ),
+                      Text(
+                        controller.isConnected
+                            ? 'Mesh Connected'
+                            : 'Solo Local',
                         overflow: TextOverflow.ellipsis,
-                        style: AppTypography.headlineSm.copyWith(fontSize: 14),
+                        style: AppTypography.headlineSm.copyWith(
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
@@ -228,7 +255,10 @@ class _TalkScreenState extends State<TalkScreen> {
     final bool isListening = controller.isListening;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 10,
+      ),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(12),
@@ -239,7 +269,11 @@ class _TalkScreenState extends State<TalkScreen> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.graphic_eq, color: AppColors.secondary, size: 20),
+              const Icon(
+                Icons.graphic_eq,
+                color: AppColors.secondary,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Text(
                 'CHANNEL 01 : RELIEF MESH',
@@ -251,13 +285,17 @@ class _TalkScreenState extends State<TalkScreen> {
           ),
           Row(
             children: List<Widget>.generate(5, (int i) {
-              final double height = isListening ? (8.0 + (i * 3.5)) : 6.0;
+              final double height =
+                  isListening ? (8.0 + (i * 3.5)) : 6.0;
+
               return Container(
                 width: 4,
                 height: height,
                 margin: const EdgeInsets.symmetric(horizontal: 2),
                 decoration: BoxDecoration(
-                  color: isListening ? AppColors.secondary : AppColors.outlineVariant,
+                  color: isListening
+                      ? AppColors.secondary
+                      : AppColors.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               );
@@ -268,7 +306,10 @@ class _TalkScreenState extends State<TalkScreen> {
     );
   }
 
-  Widget _buildModeSwitcher(bool isHandsFree, AppController controller) {
+  Widget _buildModeSwitcher(
+    bool isHandsFree,
+    AppController controller,
+  ) {
     return Center(
       child: Container(
         padding: const EdgeInsets.all(4),
@@ -283,12 +324,16 @@ class _TalkScreenState extends State<TalkScreen> {
             _ModePill(
               label: 'HOLD TO TALK',
               active: !isHandsFree,
-              onTap: () => controller.setOperationMode(OperationMode.walkieTalkie),
+              onTap: () => controller.setOperationMode(
+                OperationMode.walkieTalkie,
+              ),
             ),
             _ModePill(
               label: 'HANDS-FREE',
               active: isHandsFree,
-              onTap: () => controller.setOperationMode(OperationMode.continuous),
+              onTap: () => controller.setOperationMode(
+                OperationMode.continuous,
+              ),
             ),
           ],
         ),
@@ -296,7 +341,10 @@ class _TalkScreenState extends State<TalkScreen> {
     );
   }
 
-  Widget _buildPttStation(AppController controller, bool isHandsFree) {
+  Widget _buildPttStation(
+    AppController controller,
+    bool isHandsFree,
+  ) {
     final bool active = controller.isListening;
 
     return Column(
@@ -309,6 +357,7 @@ class _TalkScreenState extends State<TalkScreen> {
               : 'Press and hold to broadcast voice, release when finished',
           value: active ? 'Transmitting audio live' : 'Ready',
           child: GestureDetector(
+            // Hands-free mode keeps tap-to-toggle behavior.
             onTap: isHandsFree
                 ? () {
                     if (active) {
@@ -318,20 +367,36 @@ class _TalkScreenState extends State<TalkScreen> {
                     }
                   }
                 : null,
-            onLongPressStart: isHandsFree ? null : (_) => controller.startPushToTalk(),
-            onLongPressEnd: isHandsFree ? null : (_) => controller.stopPushToTalk(),
-            onLongPressCancel: isHandsFree ? null : () => controller.stopPushToTalk(),
+
+            // Walkie-talkie mode starts immediately on finger-down.
+            onTapDown:
+                isHandsFree ? null : (_) => controller.startPushToTalk(),
+
+            // Walkie-talkie mode finalizes on finger-up.
+            onTapUp:
+                isHandsFree ? null : (_) => controller.stopPushToTalk(),
+
+            // Also finalize safely if Flutter cancels the gesture.
+            onTapCancel:
+                isHandsFree ? null : () => controller.stopPushToTalk(),
+
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 250),
               width: 220,
               height: 220,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: active ? AppColors.primary : AppColors.tertiaryFixed,
+                color: active
+                    ? AppColors.primary
+                    : AppColors.tertiaryFixed,
                 boxShadow: <BoxShadow>[
                   BoxShadow(
-                    color: (active ? AppColors.primary : AppColors.tertiary)
-                        .withValues(alpha: active ? 0.6 : 0.25),
+                    color: (active
+                            ? AppColors.primary
+                            : AppColors.tertiary)
+                        .withValues(
+                          alpha: active ? 0.6 : 0.25,
+                        ),
                     blurRadius: active ? 36 : 16,
                     spreadRadius: active ? 6 : 0,
                   ),
@@ -351,18 +416,26 @@ class _TalkScreenState extends State<TalkScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      active ? Icons.radio_button_checked : Icons.mic,
+                      active
+                          ? Icons.radio_button_checked
+                          : Icons.mic,
                       size: 44,
-                      color: active ? AppColors.onPrimary : AppColors.onTertiaryFixed,
+                      color: active
+                          ? AppColors.onPrimary
+                          : AppColors.onTertiaryFixed,
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(
                     active
                         ? 'TRANSMITTING'
-                        : (isHandsFree ? 'TAP TO SPEAK' : 'HOLD TO TALK'),
+                        : (isHandsFree
+                            ? 'TAP TO SPEAK'
+                            : 'HOLD TO TALK'),
                     style: AppTypography.headlineLg.copyWith(
-                      color: active ? AppColors.onPrimary : AppColors.onTertiaryFixed,
+                      color: active
+                          ? AppColors.onPrimary
+                          : AppColors.onTertiaryFixed,
                       fontWeight: FontWeight.w800,
                       fontSize: 18,
                     ),
@@ -370,8 +443,12 @@ class _TalkScreenState extends State<TalkScreen> {
                   const SizedBox(height: 4),
                   Text(
                     active
-                        ? (isHandsFree ? 'Tap circle to stop' : 'Release when done')
-                        : (isHandsFree ? 'Tap once to begin' : 'Release when finished'),
+                        ? (isHandsFree
+                            ? 'Tap circle to stop'
+                            : 'Release when done')
+                        : (isHandsFree
+                            ? 'Tap once to begin'
+                            : 'Release when finished'),
                     style: AppTypography.labelCaps.copyWith(
                       color: (active
                               ? AppColors.onPrimary
@@ -397,7 +474,9 @@ class _TalkScreenState extends State<TalkScreen> {
   }
 
   Widget _buildLiveTranscriptCard(AppController controller) {
-    final String transcript = controller.partialTranscript.trim();
+    final String transcript =
+        controller.partialTranscript.trim();
+
     final String displayText = transcript.isNotEmpty
         ? '“$transcript”'
         : (controller.history.isNotEmpty
@@ -419,13 +498,22 @@ class _TalkScreenState extends State<TalkScreen> {
             children: <Widget>[
               Row(
                 children: <Widget>[
-                  const Icon(Icons.record_voice_over, color: AppColors.secondary, size: 18),
+                  const Icon(
+                    Icons.record_voice_over,
+                    color: AppColors.secondary,
+                    size: 18,
+                  ),
                   const SizedBox(width: 6),
-                  Text('WHAT WAS HEARD', style: AppTypography.labelCaps),
+                  Text(
+                    'WHAT WAS HEARD',
+                    style: AppTypography.labelCaps,
+                  ),
                 ],
               ),
               Text(
-                transcript.isNotEmpty ? 'Transcribing...' : 'Latest',
+                transcript.isNotEmpty
+                    ? 'Transcribing...'
+                    : 'Latest',
                 style: AppTypography.telemetrySm,
               ),
             ],
@@ -453,7 +541,10 @@ class _TalkScreenState extends State<TalkScreen> {
 
   Widget _buildQuickInput(AppController controller) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 8,
+      ),
       decoration: BoxDecoration(
         color: AppColors.surfaceContainerLow,
         borderRadius: BorderRadius.circular(12),
@@ -461,7 +552,11 @@ class _TalkScreenState extends State<TalkScreen> {
       ),
       child: Row(
         children: <Widget>[
-          const Icon(Icons.keyboard, color: AppColors.outlineVariant, size: 22),
+          const Icon(
+            Icons.keyboard,
+            color: AppColors.outlineVariant,
+            size: 22,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
@@ -482,9 +577,14 @@ class _TalkScreenState extends State<TalkScreen> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.send, color: AppColors.primary),
+            icon: const Icon(
+              Icons.send,
+              color: AppColors.primary,
+            ),
             onPressed: () {
-              final String val = _quickTextController.text.trim();
+              final String val =
+                  _quickTextController.text.trim();
+
               if (val.isNotEmpty) {
                 controller.sendTypedMessage(val);
                 _quickTextController.clear();
@@ -502,7 +602,9 @@ class _TalkScreenState extends State<TalkScreen> {
       decoration: BoxDecoration(
         color: AppColors.errorContainer.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.error.withValues(alpha: 0.6)),
+        border: Border.all(
+          color: AppColors.error.withValues(alpha: 0.6),
+        ),
       ),
       child: Column(
         children: <Widget>[
@@ -515,7 +617,11 @@ class _TalkScreenState extends State<TalkScreen> {
                   color: AppColors.error,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.warning, color: Colors.white, size: 18),
+                child: const Icon(
+                  Icons.warning,
+                  color: Colors.white,
+                  size: 18,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -550,11 +656,17 @@ class _TalkScreenState extends State<TalkScreen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
-              onPressed: () => controller.sendEmergencyPreset(),
-              icon: const Icon(Icons.emergency_share, size: 20),
+              onPressed: () =>
+                  controller.sendEmergencyPreset(),
+              icon: const Icon(
+                Icons.emergency_share,
+                size: 20,
+              ),
               label: Text(
                 'TAP TO BROADCAST EMERGENCY',
-                style: AppTypography.labelCaps.copyWith(color: Colors.white),
+                style: AppTypography.labelCaps.copyWith(
+                  color: Colors.white,
+                ),
               ),
             ),
           ),
@@ -582,16 +694,24 @@ class _ModePill extends StatelessWidget {
       borderRadius: BorderRadius.circular(24),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 10,
+        ),
         decoration: BoxDecoration(
-          color: active ? AppColors.surfaceContainerHighest : Colors.transparent,
+          color: active
+              ? AppColors.surfaceContainerHighest
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(24),
         ),
         child: Text(
           label,
           style: AppTypography.labelCaps.copyWith(
-            color: active ? AppColors.onSurface : AppColors.onSurfaceVariant,
-            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            color: active
+                ? AppColors.onSurface
+                : AppColors.onSurfaceVariant,
+            fontWeight:
+                active ? FontWeight.w700 : FontWeight.w500,
           ),
         ),
       ),
